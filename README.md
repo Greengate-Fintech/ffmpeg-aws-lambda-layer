@@ -2,6 +2,11 @@
 
 A Lambda layer containing a static version of FFmpeg/FFprobe utilities from the [`FFmpeg`](https://www.ffmpeg.org/) Linux package, compatible with Amazon Linux 2.x and Amazon Linux 1.x instances (including the `nodejs10.x` runtime, and the updated 2018.03 Amazon Linux 1 runtimes). 
 
+> This README covers general usage, building, and manual deployment. [`README-SAR.md`](README-SAR.md) is a
+> shorter, separate description rendered by the AWS Serverless Application Repository console itself (see
+> `template.yaml`'s `ReadmeUrl`) — the two are written for different audiences and are not duplicates.
+> For AI agents working on this codebase, see [`CLAUDE.md`](CLAUDE.md) and [`docs/architecture.md`](docs/architecture.md).
+
 ## Usage
 
 Absolutely the easiest way of using this is to pull it directly from the AWS Serverless Application repository into a CloudFormation/SAM application, or deploy directly from the Serverless Application Repository into your account, and then link as a layer. 
@@ -21,7 +26,11 @@ For manual deployments and custom builds, read below...
 
 This package includes FFmpeg 4.1.3, packaged by John Van Sickle. Please consider supporting him for maintaining statically built FFmpeg packages. For more information, check out <https://johnvansickle.com/ffmpeg/>
 
-The output will be in the `result` dir.
+Note that the `Makefile` always fetches John Van Sickle's *latest* static build (a rolling release alias,
+not a version-pinned URL), so a fresh build on a clean checkout may package a newer FFmpeg version than the
+4.1.3 described here — see [`docs/architecture.md`](docs/architecture.md#buildpublish-failure-modes).
+
+The output will be in the `build` dir (`build/layer/bin/` for the extracted binaries, `build/output.yaml` for the packaged CloudFormation template).
 
 Run the following command to deploy the compiled result as a layer in your AWS account.
 
