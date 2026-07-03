@@ -38,11 +38,11 @@ the layer is a manual, local operation using the AWS CLI (see [Build & Publish](
 | Aspect | Detail |
 |---|---|
 | Packaging | AWS SAM (`template.yaml`), one resource: `AWS::Serverless::LayerVersion` |
-| Binary source | `https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz` — fetched fresh on every `make` build, not vendored/pinned in this repo |
+| Binary source | `https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz` — fetched on a clean build (fresh checkout / after `make clean`); Make skips the fetch when the binary already exists in `build/`, not vendored/pinned in this repo |
 | FFmpeg version bundled | 4.1.3, per `template.yaml`'s `Metadata.AWS::ServerlessRepo::Application.Description` and `README-SAR.md` — this is a **documentation claim, not an enforced pin** (see [Build & Publish](#build--publish)) |
 | Compatible runtimes | `nodejs10.x`, `python3.6`, `ruby2.5`, `java8`, `go1.x` (`template.yaml`'s `CompatibleRuntimes`) — all now end-of-life/deprecated Lambda runtimes; the layer's binary content is runtime-agnostic (any Amazon Linux 2 Lambda can use it), but the declared compatibility list has not been updated since the original 2019 publish |
 | Distribution | AWS Serverless Application Repository (SAR), application `ffmpeg-lambda-layer` — see [Upstream vs. fork identity](#upstream-vs-fork-identity-open-question) |
-| License | Layer packaging (this repo's scripts): MIT. FFmpeg itself: GPLv2.1+; John Van Sickle's static build: GPLv3 (see `LICENSE.txt`, `README.md`) |
+| Licence | Layer packaging (this repo's scripts): MIT. FFmpeg itself: GPLv2.1; John Van Sickle's static build: GPLv3 (see `LICENSE.txt`, `README.md`) |
 | Output location | `AWS::Serverless::LayerVersion` in `build/layer` (Makefile fetches binaries there before `sam`/`cloudformation package` runs) |
 
 Full build/publish/consume flow, including a diagram: [docs/architecture.md](docs/architecture.md).
