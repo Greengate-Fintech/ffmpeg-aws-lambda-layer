@@ -39,7 +39,7 @@ the layer is a manual, local operation using the AWS CLI (see [Build & Publish](
 |---|---|
 | Packaging | AWS SAM (`template.yaml`), one resource: `AWS::Serverless::LayerVersion` |
 | Binary source | A dated BtbN/FFmpeg-Builds autobuild release (`autobuild-YYYY-MM-DD-HH-MM`), GPL variant, release branch 8.1, one asset per architecture. The release tag, asset names and SHA-256 hashes are in `versions.mk`; the `Makefile` verifies the hash before extracting. No `latest` URL is used anywhere |
-| FFmpeg version bundled | Set by `versions.mk` (`n8.1.3-17-gc389840894` at the time of writing, the same for x86_64 and arm64). Confirm with `build/<arch>/layer/bin/ffmpeg -version`. FFmpeg 7.1+ is required: earlier versions duplicate frames when converting browser-recorded WebM to MP4 without a frame-rate option |
+| FFmpeg version bundled | Set by `versions.mk` (`n8.1.3-17-gc389840894` at the time of writing, the same for x86_64 and arm64). Confirm with `build/<arch>/layer/bin/ffmpeg -version`. FFmpeg 7.1+ is required: earlier versions duplicate frames when converting browser-recorded WebM to MP4 without a frame-rate option. Evidence: Regula-Face-API-Deployment [issue #36](https://github.com/Greengate-Fintech/Regula-Face-API-Deployment/issues/36) (third comment): its version test shows 4.4.1, 6.1.1 and 7.0.2 duplicating frames, and 7.1, 7.1.1, 8.0 and 8.0.1 keeping the input frames. This repo's `make check` confirmed 7.0.2 failing (10390 frames from 300) and 8.1.3 passing (300). |
 | Architectures | `x86_64` (stack `ffmpeg-lambda-layer`, layer `ffmpeg`) and `arm64` (stack `ffmpeg-arm64-lambda-layer`, layer `ffmpeg-arm64`), chosen with `make ... ARCH=` |
 | Compatible runtimes | `nodejs24.x`, `nodejs22.x`, `python3.13` (`template.yaml`'s `CompatibleRuntimes`). The binaries are dynamically linked against glibc (needs 2.28 or later), so they suit Amazon Linux 2023 runtimes and not Amazon Linux 2 |
 | Distribution | AWS Serverless Application Repository (SAR), application `ffmpeg-lambda-layer` — see [Upstream vs. fork identity](#upstream-vs-fork-identity-open-question) |
@@ -77,7 +77,7 @@ Key `Makefile` targets, in dependency order:
 
 Edit `versions.mk` only: choose a newer BtbN `autobuild-*` release on a release branch (`n8.x`, never
 `master`), copy the `linux64-gpl` and `linuxarm64-gpl` asset names and hashes from that release's
-`checksums.sha256`, run `make check` for both architectures from a clean `build/`, then publish both layers.
+`checksums.sha256`, run `make check` for both architectures (the binaries rebuild whenever `versions.mk` changes), then publish both layers.
 Publishing creates a new layer version, so the consumer's ARN must be bumped separately.
 
 Publishing a new **SAR** application version (as opposed to a plain private CloudFormation stack deploy) is
@@ -212,9 +212,11 @@ sufficient to ship an FFmpeg update anywhere else in the org.
 
 - **Never commit the fetched FFmpeg tarball, extracted binaries, or anything under `build/`** — already
   `.gitignore`d; keep it that way.
-- **Keep the FFmpeg build pinned and hash-verified.** `versions.mk` names one dated BtbN release and a
-  SHA-256 per architecture. Never replace them with a `latest` or `master` URL, and never skip the hash
-  check. Both architectures must use the same FFmpeg version.
+- **Keep the FFmpeg build pinned, with a hash check.** `versions.mk` names one dated BtbN release and a
+  SHA-256 per architecture. The check detects any change to the asset after pinning; the pinned hashes were
+  cross-checked against BtbN's published `checksums.sha256` for that release at pin time. It does not prove
+  BtbN's own build is trustworthy. Never replace the pin with a `latest` or `master` URL, and never skip the
+  hash check. Both architectures must use the same FFmpeg version.
 - **Never point `example/template-sar.yaml` (or any new consumer template) at the upstream third-party SAR
   application ARN (`arn:aws:serverlessrepo:us-east-1:145266761615:...`) as if it were Greengate-Fintech's
   own** — see [Upstream vs. fork identity](#upstream-vs-fork-identity-open-question). If that ARN is still

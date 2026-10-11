@@ -24,9 +24,9 @@ For manual deployments and custom builds, read below...
 
 ## Deploying to AWS as a layer
 
-This package bundles a pinned FFmpeg 8.1 release-branch build (GPL variant, with libx264 and libvpx) from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), one build per architecture. The exact dated release, asset names and SHA-256 hashes are in [`versions.mk`](versions.mk). The `Makefile` verifies the SHA-256 of each download before it extracts anything, and no URL in this repository points at a "latest" alias.
+This package bundles a pinned FFmpeg 8.1 release-branch build (GPL variant, with libx264 and libvpx) from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), one build per architecture. The exact dated release, asset names and SHA-256 hashes are in [`versions.mk`](versions.mk). The `Makefile` checks each download against the pinned SHA-256 before it extracts anything (this detects any change to the asset after pinning; the pinned hashes were cross-checked against BtbN's published `checksums.sha256` at pin time, which does not prove BtbN's own build is trustworthy), and no URL in this repository points at a "latest" alias.
 
-FFmpeg 7.1 and later keep every input frame when converting variable-frame-rate input (such as a browser-recorded WebM) to MP4 without a frame-rate option. Earlier versions, including 7.0.2 from the previous build source, duplicate frames in that case. `scripts/check-layer.sh` tests exactly that.
+FFmpeg 7.1 and later keep every input frame when converting variable-frame-rate input (such as a browser-recorded WebM) to MP4 without a frame-rate option. Earlier versions, including 7.0.2 from the previous build source, duplicate frames in that case. Evidence: Regula-Face-API-Deployment [issue #36](https://github.com/Greengate-Fintech/Regula-Face-API-Deployment/issues/36) (third comment): its version test shows 4.4.1, 6.1.1 and 7.0.2 duplicating frames, and 7.1, 7.1.1, 8.0 and 8.0.1 keeping the input frames. This repo's `make check` confirmed 7.0.2 failing (10390 frames from 300) and 8.1.3 passing (300). `scripts/check-layer.sh` tests exactly that.
 
 The output is under `build/<arch>/` (`layer/bin/` for the extracted binaries, `output.yaml` for the packaged CloudFormation template).
 
@@ -52,7 +52,7 @@ Provide `STACK_NAME` or `LAYER_NAME` when calling `make deploy` to use alternati
 
 1. Pick a BtbN `autobuild-YYYY-MM-DD-HH-MM` release whose assets are on a release branch (`n8.x`, suffix `-8.x`), never `master`.
 2. Read that release's `checksums.sha256` and copy the `linux64-gpl` and `linuxarm64-gpl` asset names and hashes into `versions.mk`.
-3. Run `make check ARCH=x86_64` and `make check ARCH=arm64` from a clean `build/`, then publish both layers.
+3. Run `make check ARCH=x86_64` and `make check ARCH=arm64` (binaries rebuild whenever `versions.mk` changes), then publish both layers.
 
 ### example usage
 

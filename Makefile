@@ -32,7 +32,7 @@ endif
 clean:
 	rm -rf build
 
-$(LAYER_DIR)/bin/ffmpeg:
+$(LAYER_DIR)/bin/ffmpeg: versions.mk
 	rm -rf build/$(ARCH)/extract
 	mkdir -p build/$(ARCH)/extract $(LAYER_DIR)/bin
 	curl -fsSL -o build/$(ARCH)/$(FFMPEG_ASSET) $(FFMPEG_URL)
