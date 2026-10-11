@@ -1,22 +1,35 @@
 # Instructions for AI agents working on this codebase
 
+## Read first: this is a public repository
+
+This repository is a public fork of an open-source project. Anything you write here is published to
+everyone, permanently: files, commit messages, branch names, PR titles and descriptions, issues and
+review comments. Git history cannot be taken back.
+
+- **Write it as generic open-source documentation.** Describe the layer and how anyone would use it.
+- **Never include:** the name of the organisation hosting this fork, its AWS account IDs, internal
+  repositories, systems, consumers, people, customers, private issue or ticket links, internal hostnames,
+  or any secret. If a change is motivated by an internal problem, describe the public, technical cause
+  (for example "ffmpeg 7.0.x duplicates frames on variable-frame-rate WebM") instead.
+- **Keep internal context in the consuming project**, where its own repository and tracker are private.
+- **Licensing:** this repository's files are MIT (see `LICENSE.txt`); a built layer is GPL 3.0 or later.
+  Do not change licence statements without updating `LICENSE.txt`, `README.md` and `template.yaml`
+  together, and do not describe the built layer as MIT or LGPL.
+- **If you are unsure whether something is internal, leave it out and ask.**
+
 ## Project Overview
 
-`ffmpeg-aws-lambda-layer` packages a static-binary build of **FFmpeg**/**FFprobe** (from
-[John Van Sickle's static builds](https://johnvansickle.com/ffmpeg/)) as an **AWS Lambda layer**, using
+`ffmpeg-aws-lambda-layer` packages a shared-library build of **FFmpeg**/**FFprobe** (glibc-linked, needs glibc 2.28 or later; from
+[BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), pinned in `versions.mk`) as an **AWS Lambda layer**, using
 AWS SAM (`AWS::Serverless-2016-10-31`). It is a **build/publish artefact repository**, not a running
 service: there is no handler code here that executes on every invocation of some Lambda — the only
-"product" is the layer's `.zip` content (`ffmpeg`/`ffprobe` binaries under `bin/`) and the
+"product" is the layer's `.zip` content (`ffmpeg`/`ffprobe` binaries under `bin/`, the FFmpeg shared libraries under `lib/`) and the
 CloudFormation/SAM template that wraps it.
 
-Per the org repository inventory (`verifime-adr/doc/other/github-repo-inventory.md`, abbreviation `FLL`,
-topic `infrastructure-tooling`): "Pre-compiled FFmpeg/FFprobe binaries packaged as an AWS Lambda layer for
-video/media processing in serverless functions."
-
 **Origin**: this repository is a fork of [`serverlesspub/ffmpeg-aws-lambda-layer`](https://github.com/serverlesspub/ffmpeg-aws-lambda-layer)
-(Gojko Adzic), now hosted under `Greengate-Fintech`. Several artefacts still carry the upstream identity
+(Gojko Adzic). Several artefacts still carry the upstream identity
 verbatim — see [Upstream vs. fork identity](#upstream-vs-fork-identity-open-question) below before assuming
-any URL, ARN, or author byline in this repo is Greengate-Fintech's own.
+any URL, ARN, or author byline in this repo belongs to the fork's maintainers.
 
 There is no CI/CD in this repository — no `.github/workflows/`, only a `Makefile`. Building and publishing
 the layer is a manual, local operation using the AWS CLI (see [Build & Publish](#build--publish)).
@@ -29,47 +42,65 @@ the layer is a manual, local operation using the AWS CLI (see [Build & Publish](
 - **Not message-driven.** There is no SQS/SNS/EventBridge trigger, no retry/DLQ semantics, and therefore no
   `docs/failure-scenarios.md` in this repo (see the note in `docs/architecture.md` for why that document
   doesn't exist here, and what "failure" means for a build/publish artefact instead).
-- **Not infrastructure for a running service.** `additional-integration-cdk`'s convention of "app code here,
-  infra in the CDK repo" doesn't apply — the SAM template *is* the artefact's packaging, and CDK stacks in
-  *consumer* repositories reference the resulting layer by ARN (see [Ecosystem Position](#ecosystem-position)).
+- **Not infrastructure for a running service.** The SAM template *is* the artefact's packaging, and
+  stacks in *consumer* projects reference the resulting layer by ARN (see [Ecosystem Position](#ecosystem-position)).
 
 ## Architecture Summary
 
 | Aspect | Detail |
 |---|---|
 | Packaging | AWS SAM (`template.yaml`), one resource: `AWS::Serverless::LayerVersion` |
-| Binary source | `https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz` — fetched on a clean build (fresh checkout / after `make clean`); Make skips the fetch when the binary already exists in `build/`, not vendored/pinned in this repo |
-| FFmpeg version bundled | 4.1.3, per `template.yaml`'s `Metadata.AWS::ServerlessRepo::Application.Description` and `README-SAR.md` — this is a **documentation claim, not an enforced pin** (see [Build & Publish](#build--publish)) |
-| Compatible runtimes | `nodejs10.x`, `python3.6`, `ruby2.5`, `java8`, `go1.x` (`template.yaml`'s `CompatibleRuntimes`) — all now end-of-life/deprecated Lambda runtimes; the layer's binary content is runtime-agnostic (any Amazon Linux 2 Lambda can use it), but the declared compatibility list has not been updated since the original 2019 publish |
+| Binary source | A dated BtbN/FFmpeg-Builds autobuild release (`autobuild-YYYY-MM-DD-HH-MM`), GPL variant, release branch 8.1, one asset per architecture. The release tag, asset names and SHA-256 hashes are in `versions.mk`; the `Makefile` verifies the hash before extracting. No `latest` URL is used anywhere |
+| FFmpeg version bundled | Set by `versions.mk` (`n8.1.3-17-gc389840894` at the time of writing, the same for x86_64 and arm64). Confirm with `build/<arch>/layer/bin/ffmpeg -version`. FFmpeg 7.1+ is required: earlier versions duplicate frames when converting browser-recorded WebM to MP4 without a frame-rate option. Evidence: releases 4.4.1, 6.1.1 and 7.0.2 were tested and duplicate frames when converting variable-frame-rate WebM (1 ms time base, no declared frame rate) to MP4 without a frame-rate option, while 7.1, 7.1.1, 8.0 and 8.0.1 keep the input frames; the change matches the upstream FFmpeg commit "lavf/movenc: mark mov/mp4 as supporting VFR". This repo's `make check` confirmed 7.0.2 failing (10390 frames from 300) and 8.1.3 passing (300). |
+| Architectures | `x86_64` (stack `ffmpeg-lambda-layer`, layer `ffmpeg`) and `arm64` (stack `ffmpeg-arm64-lambda-layer`, layer `ffmpeg-arm64`), chosen with `make ... ARCH=` |
+| Compatible runtimes | `nodejs24.x`, `nodejs22.x`, `python3.13` (`template.yaml`'s `CompatibleRuntimes`). The binaries are dynamically linked against glibc (needs 2.28 or later), so they suit Amazon Linux 2023 runtimes and not Amazon Linux 2 |
 | Distribution | AWS Serverless Application Repository (SAR), application `ffmpeg-lambda-layer` — see [Upstream vs. fork identity](#upstream-vs-fork-identity-open-question) |
-| Licence | Layer packaging (this repo's scripts): MIT. FFmpeg itself: GPLv2.1; John Van Sickle's static build: GPLv3 (see `LICENSE.txt`, `README.md`) |
-| Output location | `AWS::Serverless::LayerVersion` in `build/layer` (Makefile fetches binaries there before `sam`/`cloudformation package` runs) |
+| Licence | This repo's own files: MIT (upstream contributors; modifications Copyright (c) 2026 the contributors to this fork). FFmpeg: LGPL 2.1+ with optional GPL parts; the BtbN `gpl` build used here (`--enable-gpl --enable-version3`) makes a built layer GPL 3.0 or later (`template.yaml` `LicenseInfo: GPL-3.0-or-later`). See `LICENSE.txt` |
+| Output location | `AWS::Serverless::LayerVersion` from `build/<arch>/layer` (the Makefile fetches and verifies binaries there before `cloudformation package` runs) |
 
 Full build/publish/consume flow, including a diagram: [docs/architecture.md](docs/architecture.md).
 
 ## Build & Publish
 
 ```bash
-make deploy DEPLOYMENT_BUCKET=<your-s3-bucket>       # build + package + deploy the layer stack
+make build ARCH=x86_64                               # download, verify SHA-256 and extract (ARCH: x86_64 | arm64)
+make check ARCH=x86_64                               # build, then run scripts/check-layer.sh against the layer
+make deploy ARCH=x86_64 DEPLOYMENT_BUCKET=<your-s3-bucket>   # build + package + deploy the layer stack
 make deploy-example DEPLOYMENT_BUCKET=<your-s3-bucket>   # build + deploy the example consumer stack
 make clean                                            # remove build/ (forces a re-fetch of the FFmpeg tarball)
 ```
 
-There is no `make test`, `make lint`, or `make build` target that runs independently of `deploy` — `make
-deploy` is the only entry point, and it always re-downloads the FFmpeg tarball on a clean `build/` (see
-`Makefile`'s `build/layer/bin/ffmpeg` target). There are no automated tests in this repository.
+`make check` is the only test. It fails if the layer directory is over 240,000,000 bytes (`du -sb`; Lambda's
+limit for a function and all its layers is 262,144,000), if it contains any symlink (`aws cloudformation
+package` zips each link as a full copy), or if `ldd` reports a library of `ffmpeg`/`ffprobe` as not found,
+running the binaries with `LD_LIBRARY_PATH=<layer>/lib` as Lambda will. It then generates a WebM with irregular timestamps (a 1 ms time base, as browsers
+record), converts it with a plain `-f mp4` and requires the output to hold 95-100% of the input frames.
+FFmpeg 7.0.2 (the previous build source) fails it with about 10,000 frames from 300. For `ARCH=arm64` on
+an x86_64 host the binaries run in an `amazonlinux:2023` container under QEMU (see `README.md`).
 
 Key `Makefile` targets, in dependency order:
-1. `build/layer/bin/ffmpeg` — `curl`s the **latest** `ffmpeg-release-amd64-static.tar.xz` from John Van
-   Sickle's site and extracts `ffmpeg`/`ffprobe` into `build/layer/bin/`. **This target is not tied to any
-   specific FFmpeg release** — "latest" as of the wire is whatever John Van Sickle's server currently serves,
-   not necessarily the 4.1.3 documented in `README.md`/`README-SAR.md`/`template.yaml`. Re-running `make
-   deploy` after a `make clean` can silently pull in a newer FFmpeg build than the one the repo's own
-   documentation and SAR listing claim to ship.
-2. `build/output.yaml` — `aws cloudformation package` uploads `build/layer` to `$(DEPLOYMENT_BUCKET)` and
-   rewrites `template.yaml`'s `ContentUri` to the resulting S3 object.
-3. `deploy` — `aws cloudformation deploy` of the packaged template, stack name `$(STACK_NAME)` (default
-   `ffmpeg-lambda-layer`), then prints the stack's `Outputs` (the layer's `LayerVersion` ARN).
+1. `build/<arch>/layer/bin/ffmpeg` — downloads the asset named in `versions.mk` for `$(ARCH)`, stops if its
+   SHA-256 differs (`FFMPEG_SHA256_OVERRIDE` can be set to test that), then extracts `ffmpeg`/`ffprobe` into
+   `build/<arch>/layer/bin/` and each FFmpeg shared library, once, as a regular file named by its soname
+   (`libavcodec.so.62` and so on) into `build/<arch>/layer/lib/`. Headers, pkg-config files, docs and
+   `ffplay` are left out. The static assets are not used: their x86_64 `ffmpeg` plus `ffprobe` is 344 MB,
+   over Lambda's size limit.
+2. `build/<arch>/output.yaml` — `aws cloudformation package` uploads `build/<arch>/layer` to
+   `$(DEPLOYMENT_BUCKET)` and rewrites the `ContentUri` of a per-architecture copy of `template.yaml`.
+   `README-SAR.md` and `LICENSE.txt` are copied into `build/<arch>/` beside it, because package resolves
+   `ReadmeUrl` and `LicenseUrl` relative to the template. `make check-template` (part of `make check`,
+   `scripts/check-template-paths.sh`) fails if `ContentUri`, `ReadmeUrl` or `LicenseUrl` names a local
+   path that does not exist relative to the per-architecture template.
+3. `deploy` — `aws cloudformation deploy` of the packaged template with `LayerName` and `Architecture`
+   parameter overrides, stack name `$(STACK_NAME)` (`ffmpeg-lambda-layer` for x86_64,
+   `ffmpeg-arm64-lambda-layer` for arm64), then prints the stack's `Outputs` (the layer's `LayerVersion` ARN).
+
+### Bumping FFmpeg
+
+Edit `versions.mk` only: choose a newer BtbN `autobuild-*` release on a release branch (`n8.x`, never
+`master`), copy the `linux64-gpl-shared` and `linuxarm64-gpl-shared` asset names and hashes from that release's
+`checksums.sha256`, run `make check` for both architectures (the binaries rebuild whenever `versions.mk` changes), then publish both layers.
+Publishing creates a new layer version, so the consumer's ARN must be bumped separately.
 
 Publishing a new **SAR** application version (as opposed to a plain private CloudFormation stack deploy) is
 a separate, manual step not scripted anywhere in this repo — see the open question below.
@@ -77,28 +108,22 @@ a separate, manual step not scripted anywhere in this repo — see the open ques
 ## Upstream vs. fork identity (open question)
 
 This repository is a fork of `serverlesspub/ffmpeg-aws-lambda-layer`. Several places in the repo still
-reference the **upstream** project's identity, and it is not confirmed whether Greengate-Fintech has ever
-re-published this fork as its own SAR application, or whether internal consumers still (knowingly or not)
-consume the original third-party SAR listing:
+reference the **upstream** project's identity, and it is not confirmed whether this fork has ever been
+re-published as its own SAR application, or whether users still consume the upstream SAR listing:
 
 - `template.yaml`'s `Metadata.AWS::ServerlessRepo::Application` block: `Author: Gojko Adzic`,
   `HomePageUrl`/`SourceCodeUrl: https://github.com/serverlesspub/ffmpeg-aws-lambda-layer`,
   `SemanticVersion: 1.0.0`.
 - `README.md` links to
   `https://serverlessrepo.aws.amazon.com/applications/arn:aws:serverlessrepo:us-east-1:145266761615:applications~ffmpeg-lambda-layer`
-  — SAR account `145266761615` is the **original publisher's** AWS account, not a Greengate-Fintech account
-  (Greengate-Fintech's known non-prod/prod accounts are `921483706620`/`772479554838` — see
-  [Ecosystem Position](#ecosystem-position)).
+  — SAR account `145266761615` is the **upstream publisher's** AWS account (the upstream project's SAR
+  listing), not an account belonging to this fork.
 - `example/template-sar.yaml` deploys the example by referencing that same third-party SAR application ARN
   directly (`ApplicationId: arn:aws:serverlessrepo:us-east-1:145266761615:applications/ffmpeg-lambda-layer`).
 
-> **TODO(owner):** Confirm whether Greengate-Fintech has published its own SAR application/private
-> CloudFormation stack from this fork (and if so, under which account/ARN and at which `SemanticVersion`),
-> or whether the layer consumed internally (see `Regula-Face-API-Deployment` below) was deployed by manually
-> running `make deploy` once against a Greengate-Fintech account rather than via SAR at all. The confirmed
-> consumer's layer ARN (`arn:aws:lambda:ap-southeast-2:<account>:layer:ffmpeg:1`, a plain Lambda layer ARN,
-> not a SAR application ARN) is consistent with the latter — a one-off `make deploy`/manual publish — but
-> this has not been verified against deployment history or account resources.
+> **TODO(owner):** Decide whether to publish this fork as its own SAR application (replacing the upstream
+> `Author`, URLs and `SemanticVersion` in the template metadata and README), or to keep deploying it only as
+> a private CloudFormation stack with `make deploy`. Until then the upstream identity above stays as is.
 
 ## The `example/` directory
 
@@ -110,48 +135,25 @@ upstream SAR application ARN directly instead, see above).
 
 `example/src/index.js` is a Node.js 10.x S3-triggered handler that downloads an uploaded video, shells out to
 `/opt/bin/ffmpeg` (the path every Lambda layer's content is mounted at) to extract a thumbnail frame, and
-uploads the result to a second bucket. This is the same `/opt/bin/ffmpeg` invocation pattern used by the
-confirmed real consumer, `Regula-Face-API-Deployment` — see below.
+uploads the result to a second bucket. This is the same `/opt/bin/ffmpeg` invocation pattern any consuming Lambda uses — see below.
 
 ## Ecosystem Position
 
-This is a leaf/infrastructure-tooling repository: nothing in this repo depends on any other Greengate-Fintech
-repo, but at least one other repo depends on **its output** (a deployed Lambda layer), not on this repo's
-source directly (there is no package/module import relationship — only "some AWS account has a
-`layer:ffmpeg` Lambda layer version deployed").
+This is a leaf repository: nothing in it depends on other projects, but a consuming Lambda depends on
+**its output** (a deployed Lambda layer), not on this repo's source (there is no package/module import
+relationship — only "some AWS account has an `ffmpeg` Lambda layer version deployed").
 
-**Confirmed consumer**: [`Regula-Face-API-Deployment`](https://github.com/Greengate-Fintech/Regula-Face-API-Deployment)
-(CDK infrastructure for the Regula biometric face verification service):
+A consumer attaches the layer by its `LayerVersion` ARN (for example with
+`lambda.LayerVersion.fromLayerVersionArn(...)` in CDK, or `Layers:` in SAM/CloudFormation) and calls
+`/opt/bin/ffmpeg` and `/opt/bin/ffprobe`, the path any Lambda layer's content is mounted at. This is the
+pattern `example/src/index.js` shows.
 
-- `lib/constants.ts:88` (dev) and `:109` (prod) hard-code the layer ARN by convention rather than importing
-  it from this repo or from a CloudFormation export:
-  ```
-  ffmpegLayerArn: `arn:aws:lambda:${region}:${account}:layer:ffmpeg:1`
-  ```
-  resolving to `arn:aws:lambda:ap-southeast-2:921483706620:layer:ffmpeg:1` (non-prod) and
-  `arn:aws:lambda:ap-southeast-2:772479554838:layer:ffmpeg:1` (prod) — i.e. **layer version `1`, pinned**, in
-  each of Regula's own accounts. This is a plain Lambda layer ARN, not a reference to the SAR application
-  itself (see the open question above).
-- `lib/regula-face-api-s3-bucket-stack.ts:121-125` imports that ARN via
-  `lambda.LayerVersion.fromLayerVersionArn(...)` and attaches it (`layers: [ffmpegLayer]`) to the
-  `ConvertFileFunction` Lambda (`regula-face-api-s3-bucket-stack.ts:138`), which is triggered by an S3
-  `OBJECT_CREATED` event on a `video.mp4` upload.
-- `lambda/regula-face-api-s3-video-convert-function/convert-video-function.ts:57-61` shells out to
-  `/opt/bin/ffmpeg` (the path this layer's content is mounted at inside any Lambda that attaches it) to
-  transcode the uploaded session video to MP4, exactly mirroring `example/src/index.js`'s invocation
-  pattern in this repo.
-
-No other repository under `/home/user/` (searched exhaustively for `ffmpeg`, `ffprobe`, `FFMPEG_LAYER`, and
-`serverlessrepo`, case-insensitive) references this layer, an FFmpeg binary, or the upstream SAR
-application. Because `Regula-Face-API-Deployment` pins layer **version 1** by ARN, a new layer version
-published from this repo does **not** automatically propagate to that consumer — it would need its own CDK
-change to bump the `:1` suffix. Keep this in mind before assuming "publish a new version here" is
-sufficient to ship an FFmpeg update anywhere else in the org.
-
-> **TODO(owner):** Confirm with the Regula-Face-API-Deployment or platform-engineering owner exactly how and
-> when `arn:...:layer:ffmpeg:1` was created in the `921483706620`/`772479554838` accounts (this repo's `make
-> deploy` run against those accounts directly, versus a SAR-based deploy) — not verifiable from either
-> repo's Git history alone.
+- Layer ARNs are account- and region-specific (`arn:aws:lambda:REGION:ACCOUNT:layer:ffmpeg:N`); a layer
+  version published in one account or region does not exist in another.
+- Publishing a new layer version does **not** update consumers that pin a version by ARN: each consumer
+  must change its own ARN's version suffix. Publishing here is not sufficient to ship an FFmpeg update.
+- The pinned FFmpeg 8.x build publishes as the `ffmpeg` (x86_64) and `ffmpeg-arm64` (arm64) layers; a
+  consumer should attach the layer matching its function's architecture.
 
 ## Conventions
 
@@ -159,7 +161,7 @@ sufficient to ship an FFmpeg update anywhere else in the org.
   existing upstream README text is US-spelled in places (e.g. "License") and is left as-is rather than
   rewritten wholesale, per the "improve/reconcile only for real gaps" scope of this documentation pass.
 - **Do not vendor or commit the fetched FFmpeg tarball or extracted binaries.** `build/` is `.gitignore`d;
-  the Makefile always fetches fresh from John Van Sickle's site.
+  the Makefile always fetches from BtbN's GitHub release and checks the SHA-256 in `versions.mk`.
 - **Treat `README.md` (root, MIT-focused, general usage) and `README-SAR.md` (SAR-listing-focused, shown
   inside the AWS Serverless Application Repository console) as two different audiences for the same
   artefact, not duplicates to be merged.** `template.yaml`'s `Metadata.AWS::ServerlessRepo::Application.ReadmeUrl`
@@ -170,14 +172,15 @@ sufficient to ship an FFmpeg update anywhere else in the org.
 - **The `LGPL version` pointer in `README.md`** (a community fork at
   `giusedroid/ffmpeg-aws-lambda-layer` on the `license/lgpl` branch, containing only LGPL-licensed FFmpeg
   components) is there for organisations concerned about GPL licensing obligations. This repo's own default
-  build is **GPL** (per `template.yaml`'s `LicenseInfo: GPL-2.0-or-later` and the John Van Sickle static
-  build being GPLv3) — do not remove that pointer or imply this repo's own layer is LGPL-clean.
+  build is **GPL 3.0 or later** (per `template.yaml`'s `LicenseInfo: GPL-3.0-or-later`, matching the BtbN `gpl` build's `--enable-gpl --enable-version3`) — do not remove that pointer or imply this repo's own layer is LGPL-clean.
 
 ## Key Files
 
 - `template.yaml` — the SAM template; the single `AWS::Serverless::LayerVersion` resource plus the
   `AWS::ServerlessRepo::Application` metadata block that drives the SAR listing.
-- `Makefile` — fetch FFmpeg → package → deploy. See [Build & Publish](#build--publish).
+- `versions.mk` — the pinned BtbN release, asset names and SHA-256 hashes per architecture.
+- `Makefile` — fetch and verify FFmpeg → check → package → deploy, per `ARCH`. See [Build & Publish](#build--publish).
+- `scripts/check-layer.sh` — functional check (frame count on irregular-timestamp WebM → MP4) run by `make check`.
 - `README.md` — GitHub-facing usage/build/deploy/licensing doc.
 - `README-SAR.md` — short description rendered inside the AWS Serverless Application Repository console
   (referenced by `template.yaml`'s `ReadmeUrl`).
@@ -189,28 +192,28 @@ sufficient to ship an FFmpeg update anywhere else in the org.
 
 ## Git
 
-- Default branch: **`master`** (not `main` — this repo predates the org's later `main`-default convention
-  and, as an inherited fork, has not been renamed).
-- Remote `origin` → GitHub (`Greengate-Fintech/ffmpeg-aws-lambda-layer`)
+- Default branch: **`master`** (not `main` — as an inherited fork, it has not been renamed).
+- Remote `origin` → this fork on GitHub.
 - No GitHub Actions workflows exist in this repository (no `.github/` directory at all) — there is no CI
-  gate; validate any change by running `make deploy` against a real AWS account before merging.
+  gate; run `make check ARCH=x86_64` and `make check ARCH=arm64` for any change to the build, and validate template changes by running `make deploy` against a real AWS account before merging.
 
 ## Security & Boundaries
 
+- **Public repository:** see [Read first](#read-first-this-is-a-public-repository) at the top of this file.
+- **Keep `LICENSE.txt` accurate** when the build source or its configure flags change: it states the
+  MIT terms for this repo's files and the GPL 3.0-or-later status of a built layer.
 - **Never commit the fetched FFmpeg tarball, extracted binaries, or anything under `build/`** — already
   `.gitignore`d; keep it that way.
-- **Never assume the bundled FFmpeg version is pinned.** The Makefile always fetches
-  `ffmpeg-release-amd64-static.tar.xz` (John Van Sickle's rolling "latest static build" alias, not a
-  version-numbered URL) — the documented "4.1.3" in `README.md`/`README-SAR.md`/`template.yaml` reflects
-  whatever was current when those files were last written, not a guarantee about what a fresh `make deploy`
-  will actually package today. If you need version-pinning or reproducible builds, that is a real gap in
-  this repo's current design, not a solved problem — do not describe it as pinned in new documentation.
+- **Keep the FFmpeg build pinned, with a hash check.** `versions.mk` names one dated BtbN release and a
+  SHA-256 per architecture. The check detects any change to the asset after pinning; the pinned hashes were
+  cross-checked against BtbN's published `checksums.sha256` for that release at pin time. It does not prove
+  BtbN's own build is trustworthy. Never replace the pin with a `latest` or `master` URL, and never skip the
+  hash check. Both architectures must use the same FFmpeg version.
 - **Never point `example/template-sar.yaml` (or any new consumer template) at the upstream third-party SAR
-  application ARN (`arn:aws:serverlessrepo:us-east-1:145266761615:...`) as if it were Greengate-Fintech's
-  own** — see [Upstream vs. fork identity](#upstream-vs-fork-identity-open-question). If that ARN is still
-  the one actually in use internally, treat it as an explicit third-party dependency (outside
-  Greengate-Fintech's control/patch cadence) and flag it, rather than silently treating it as part of an
-  in-house supply chain.
+  application ARN (`arn:aws:serverlessrepo:us-east-1:145266761615:...`) as if it were this fork's own**
+  — see [Upstream vs. fork identity](#upstream-vs-fork-identity-open-question). If that ARN is still in
+  use, treat it as an explicit third-party dependency (outside this fork's control and patch cadence) and
+  flag it, rather than silently treating it as part of your own supply chain.
 - **Respect the GPL obligations already documented in `LICENSE.txt`/`README.md`.** This repo's own
   packaging scripts are MIT, but the bundled FFmpeg/FFprobe binaries are GPL — do not describe the layer as
   a whole as "MIT licensed" in new documentation.
