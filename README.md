@@ -73,8 +73,11 @@ Gojko Adzic <https://gojko.net>
 
 ## License
 
-* These scripts: [MIT](https://opensource.org/licenses/MIT)
-* FFmpeg: GPLv2.1 <http://ffmpeg.org/legal.html>, the BtbN GPL build is GPLv3 <https://github.com/BtbN/FFmpeg-Builds>
+This is a public fork of [serverlesspub/ffmpeg-aws-lambda-layer](https://github.com/serverlesspub/ffmpeg-aws-lambda-layer): every change committed here is published openly. See [LICENSE.txt](LICENSE.txt) for the full terms and disclaimer.
+
+* These scripts, templates and docs: [MIT](https://opensource.org/licenses/MIT) (original work by the upstream contributors; modifications Copyright (c) 2026 Greengate Fintech).
+* FFmpeg: LGPL 2.1 or later with optional GPL components <https://ffmpeg.org/legal.html>. The binaries are not in this repository; the BtbN `gpl` build that `make build` downloads is configured with `--enable-gpl --enable-version3`, so a built layer is **GPL version 3 or later**. Whoever distributes a built layer (for example via the Serverless Application Repository, or by sharing it with another account) must meet the GPL's terms, including making the corresponding source available.
+* Provided "as is", without warranty. Not legal advice.
 
 ## LGPL version
 

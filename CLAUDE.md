@@ -43,7 +43,7 @@ the layer is a manual, local operation using the AWS CLI (see [Build & Publish](
 | Architectures | `x86_64` (stack `ffmpeg-lambda-layer`, layer `ffmpeg`) and `arm64` (stack `ffmpeg-arm64-lambda-layer`, layer `ffmpeg-arm64`), chosen with `make ... ARCH=` |
 | Compatible runtimes | `nodejs24.x`, `nodejs22.x`, `python3.13` (`template.yaml`'s `CompatibleRuntimes`). The binaries are dynamically linked against glibc (needs 2.28 or later), so they suit Amazon Linux 2023 runtimes and not Amazon Linux 2 |
 | Distribution | AWS Serverless Application Repository (SAR), application `ffmpeg-lambda-layer` — see [Upstream vs. fork identity](#upstream-vs-fork-identity-open-question) |
-| Licence | Layer packaging (this repo's scripts): MIT. FFmpeg itself: GPLv2.1; the BtbN GPL build: GPLv3 (see `LICENSE.txt`, `README.md`) |
+| Licence | This repo's own files: MIT (upstream contributors; modifications Copyright (c) 2026 Greengate Fintech). FFmpeg: LGPL 2.1+ with optional GPL parts; the BtbN `gpl` build used here (`--enable-gpl --enable-version3`) makes a built layer GPL 3.0 or later (`template.yaml` `LicenseInfo: GPL-3.0-or-later`). See `LICENSE.txt` |
 | Output location | `AWS::Serverless::LayerVersion` from `build/<arch>/layer` (the Makefile fetches and verifies binaries there before `cloudformation package` runs) |
 
 Full build/publish/consume flow, including a diagram: [docs/architecture.md](docs/architecture.md).
@@ -192,7 +192,7 @@ sufficient to ship an FFmpeg update anywhere else in the org.
 - **The `LGPL version` pointer in `README.md`** (a community fork at
   `giusedroid/ffmpeg-aws-lambda-layer` on the `license/lgpl` branch, containing only LGPL-licensed FFmpeg
   components) is there for organisations concerned about GPL licensing obligations. This repo's own default
-  build is **GPL** (per `template.yaml`'s `LicenseInfo: GPL-2.0-or-later` and the BtbN GPL build being GPLv3) — do not remove that pointer or imply this repo's own layer is LGPL-clean.
+  build is **GPL 3.0 or later** (per `template.yaml`'s `LicenseInfo: GPL-3.0-or-later`, matching the BtbN `gpl` build's `--enable-gpl --enable-version3`) — do not remove that pointer or imply this repo's own layer is LGPL-clean.
 
 ## Key Files
 
@@ -220,6 +220,12 @@ sufficient to ship an FFmpeg update anywhere else in the org.
 
 ## Security & Boundaries
 
+- **This is a public repository (a fork of an open-source project).** Every commit, branch, PR description
+  and review comment is visible to anyone and is published under the MIT terms in `LICENSE.txt`. Never add
+  internal or confidential information: no secrets, internal hostnames, customer data, private issue
+  content, or details of internal systems beyond what is needed to use the layer.
+- **Keep `LICENSE.txt` accurate** when the build source or its configure flags change: it states the
+  MIT terms for this repo's files and the GPL 3.0-or-later status of a built layer.
 - **Never commit the fetched FFmpeg tarball, extracted binaries, or anything under `build/`** — already
   `.gitignore`d; keep it that way.
 - **Keep the FFmpeg build pinned, with a hash check.** `versions.mk` names one dated BtbN release and a

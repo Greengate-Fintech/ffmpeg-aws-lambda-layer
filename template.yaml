@@ -32,7 +32,7 @@ Resources:
         - python3.13
       CompatibleArchitectures:
         - !Ref Architecture
-      LicenseInfo: GPL-2.0-or-later
+      LicenseInfo: GPL-3.0-or-later
       RetentionPolicy: Retain
 
 Outputs:
@@ -47,7 +47,7 @@ Metadata:
       Pinned shared-library build of FFmpeg/FFprobe (glibc 2.28 or later) for Amazon Linux 2023,
       packaged as a Lambda layer. The bundled version is set in versions.mk
     Author: Gojko Adzic
-    SpdxLicenseId: GPL-2.0-or-later
+    SpdxLicenseId: GPL-3.0-or-later
     LicenseUrl: LICENSE.txt
     ReadmeUrl: README-SAR.md 
     Labels: ['layer', 'lambda', 'ffmpeg', 'ffprobe']
