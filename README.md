@@ -33,6 +33,7 @@ The output is under `build/<arch>/` (`layer/bin/` for the binaries, `layer/lib/`
 ```
 make build ARCH=x86_64               # download, verify and extract (ARCH is x86_64 or arm64; default x86_64)
 make check ARCH=x86_64               # build, then check the layer (size, no symlinks, libraries resolve, frame count)
+                                     # and the per-architecture template's local paths (make check-template)
 make deploy ARCH=x86_64 DEPLOYMENT_BUCKET=<YOUR BUCKET NAME>
 make deploy ARCH=arm64 DEPLOYMENT_BUCKET=<YOUR BUCKET NAME>
 ```

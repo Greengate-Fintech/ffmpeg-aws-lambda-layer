@@ -75,6 +75,10 @@ Key `Makefile` targets, in dependency order:
    over Lambda's size limit.
 2. `build/<arch>/output.yaml` — `aws cloudformation package` uploads `build/<arch>/layer` to
    `$(DEPLOYMENT_BUCKET)` and rewrites the `ContentUri` of a per-architecture copy of `template.yaml`.
+   `README-SAR.md` and `LICENSE.txt` are copied into `build/<arch>/` beside it, because package resolves
+   `ReadmeUrl` and `LicenseUrl` relative to the template. `make check-template` (part of `make check`,
+   `scripts/check-template-paths.sh`) fails if `ContentUri`, `ReadmeUrl` or `LicenseUrl` names a local
+   path that does not exist relative to the per-architecture template.
 3. `deploy` — `aws cloudformation deploy` of the packaged template with `LayerName` and `Architecture`
    parameter overrides, stack name `$(STACK_NAME)` (`ffmpeg-lambda-layer` for x86_64,
    `ffmpeg-arm64-lambda-layer` for arm64), then prints the stack's `Outputs` (the layer's `LayerVersion` ARN).

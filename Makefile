@@ -51,11 +51,20 @@ $(LAYER_DIR)/bin/ffmpeg: versions.mk
 
 build: $(LAYER_DIR)/bin/ffmpeg
 
-check: build
+check: build check-template
 	RUNNER='$(CHECK_RUNNER)' scripts/check-layer.sh $(LAYER_DIR)
 
+# The per-architecture template must find everything package uploads next to it.
+check-template: build/$(ARCH)/template.yaml $(LAYER_DIR)/bin/ffmpeg
+	scripts/check-template-paths.sh build/$(ARCH)/template.yaml
+
 # template.yaml points at build/layer; the per-architecture copy points at its own layer directory.
-build/$(ARCH)/template.yaml: template.yaml
+# package resolves ReadmeUrl and LicenseUrl relative to the template, so copy those files next to it.
+build/$(ARCH)/README-SAR.md build/$(ARCH)/LICENSE.txt: build/$(ARCH)/%: %
+	mkdir -p build/$(ARCH)
+	cp $< $@
+
+build/$(ARCH)/template.yaml: template.yaml build/$(ARCH)/README-SAR.md build/$(ARCH)/LICENSE.txt
 	mkdir -p build/$(ARCH)
 	sed 's|ContentUri: build/layer|ContentUri: layer|' $< > $@
 
@@ -71,4 +80,4 @@ deploy-example:
 	cd example && \
 		make deploy DEPLOYMENT_BUCKET=$(DEPLOYMENT_BUCKET) LAYER_STACK_NAME=$(STACK_NAME)
 
-.PHONY: clean build check deploy deploy-example
+.PHONY: clean build check check-template deploy deploy-example
