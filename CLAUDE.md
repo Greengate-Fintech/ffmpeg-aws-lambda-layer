@@ -2,11 +2,11 @@
 
 ## Project Overview
 
-`ffmpeg-aws-lambda-layer` packages a static-binary build of **FFmpeg**/**FFprobe** (from
+`ffmpeg-aws-lambda-layer` packages a shared-library build of **FFmpeg**/**FFprobe** (glibc-linked, needs glibc 2.28 or later; from
 [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), pinned in `versions.mk`) as an **AWS Lambda layer**, using
 AWS SAM (`AWS::Serverless-2016-10-31`). It is a **build/publish artefact repository**, not a running
 service: there is no handler code here that executes on every invocation of some Lambda — the only
-"product" is the layer's `.zip` content (`ffmpeg`/`ffprobe` binaries under `bin/`) and the
+"product" is the layer's `.zip` content (`ffmpeg`/`ffprobe` binaries under `bin/`, the FFmpeg shared libraries under `lib/`) and the
 CloudFormation/SAM template that wraps it.
 
 Per the org repository inventory (`verifime-adr/doc/other/github-repo-inventory.md`, abbreviation `FLL`,
@@ -52,13 +52,16 @@ Full build/publish/consume flow, including a diagram: [docs/architecture.md](doc
 
 ```bash
 make build ARCH=x86_64                               # download, verify SHA-256 and extract (ARCH: x86_64 | arm64)
-make check ARCH=x86_64                               # build, then run scripts/check-layer.sh against the binaries
+make check ARCH=x86_64                               # build, then run scripts/check-layer.sh against the layer
 make deploy ARCH=x86_64 DEPLOYMENT_BUCKET=<your-s3-bucket>   # build + package + deploy the layer stack
 make deploy-example DEPLOYMENT_BUCKET=<your-s3-bucket>   # build + deploy the example consumer stack
 make clean                                            # remove build/ (forces a re-fetch of the FFmpeg tarball)
 ```
 
-`make check` is the only test. It generates a WebM with irregular timestamps (a 1 ms time base, as browsers
+`make check` is the only test. It fails if the layer directory is over 240,000,000 bytes (`du -sb`; Lambda's
+limit for a function and all its layers is 262,144,000), if it contains any symlink (`aws cloudformation
+package` zips each link as a full copy), or if `ldd` reports a library of `ffmpeg`/`ffprobe` as not found,
+running the binaries with `LD_LIBRARY_PATH=<layer>/lib` as Lambda will. It then generates a WebM with irregular timestamps (a 1 ms time base, as browsers
 record), converts it with a plain `-f mp4` and requires the output to hold 95-100% of the input frames.
 FFmpeg 7.0.2 (the previous build source) fails it with about 10,000 frames from 300. For `ARCH=arm64` on
 an x86_64 host the binaries run in an `amazonlinux:2023` container under QEMU (see `README.md`).
@@ -66,7 +69,10 @@ an x86_64 host the binaries run in an `amazonlinux:2023` container under QEMU (s
 Key `Makefile` targets, in dependency order:
 1. `build/<arch>/layer/bin/ffmpeg` — downloads the asset named in `versions.mk` for `$(ARCH)`, stops if its
    SHA-256 differs (`SHA256` can be overridden to test that), then extracts `ffmpeg`/`ffprobe` into
-   `build/<arch>/layer/bin/`.
+   `build/<arch>/layer/bin/` and each FFmpeg shared library, once, as a regular file named by its soname
+   (`libavcodec.so.62` and so on) into `build/<arch>/layer/lib/`. Headers, pkg-config files, docs and
+   `ffplay` are left out. The static assets are not used: their x86_64 `ffmpeg` plus `ffprobe` is 344 MB,
+   over Lambda's size limit.
 2. `build/<arch>/output.yaml` — `aws cloudformation package` uploads `build/<arch>/layer` to
    `$(DEPLOYMENT_BUCKET)` and rewrites the `ContentUri` of a per-architecture copy of `template.yaml`.
 3. `deploy` — `aws cloudformation deploy` of the packaged template with `LayerName` and `Architecture`
@@ -76,7 +82,7 @@ Key `Makefile` targets, in dependency order:
 ### Bumping FFmpeg
 
 Edit `versions.mk` only: choose a newer BtbN `autobuild-*` release on a release branch (`n8.x`, never
-`master`), copy the `linux64-gpl` and `linuxarm64-gpl` asset names and hashes from that release's
+`master`), copy the `linux64-gpl-shared` and `linuxarm64-gpl-shared` asset names and hashes from that release's
 `checksums.sha256`, run `make check` for both architectures (the binaries rebuild whenever `versions.mk` changes), then publish both layers.
 Publishing creates a new layer version, so the consumer's ARN must be bumped separately.
 

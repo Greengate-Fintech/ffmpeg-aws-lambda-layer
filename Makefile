@@ -32,18 +32,27 @@ endif
 clean:
 	rm -rf build
 
+# The layer holds bin/ffmpeg, bin/ffprobe and lib/ with each FFmpeg shared library once,
+# as a regular file named by its soname (libavcodec.so.62), which is what the binaries
+# load. The .so and full-version names are symlinks, and aws cloudformation package
+# would zip each link as another full copy. bin/ moves in last, so a failed build
+# leaves no bin/ffmpeg and the next run starts again.
 $(LAYER_DIR)/bin/ffmpeg: versions.mk
-	rm -rf build/$(ARCH)/extract
-	mkdir -p build/$(ARCH)/extract $(LAYER_DIR)/bin
+	rm -rf build/$(ARCH)/extract $(LAYER_DIR)
+	mkdir -p build/$(ARCH)/extract $(LAYER_DIR)
 	curl -fsSL -o build/$(ARCH)/$(FFMPEG_ASSET) $(FFMPEG_URL)
 	echo "$(SHA256)  build/$(ARCH)/$(FFMPEG_ASSET)" | sha256sum -c -
-	tar -xJf build/$(ARCH)/$(FFMPEG_ASSET) -C build/$(ARCH)/extract --strip-components=2 --wildcards '*/bin/ffmpeg' '*/bin/ffprobe'
-	mv build/$(ARCH)/extract/ffmpeg build/$(ARCH)/extract/ffprobe $(LAYER_DIR)/bin
+	tar -xJf build/$(ARCH)/$(FFMPEG_ASSET) -C build/$(ARCH)/extract --strip-components=1 --wildcards '*/bin/ffmpeg' '*/bin/ffprobe' '*/lib/*.so*'
+	mkdir -p $(LAYER_DIR)/lib
+	for lib in build/$(ARCH)/extract/lib/*.so.*; do \
+		case "$${lib##*.so.}" in *.*) ;; *) cp -L "$$lib" $(LAYER_DIR)/lib/ ;; esac; \
+	done
+	mv build/$(ARCH)/extract/bin $(LAYER_DIR)
 
 build: $(LAYER_DIR)/bin/ffmpeg
 
 check: build
-	RUNNER='$(CHECK_RUNNER)' scripts/check-layer.sh $(LAYER_DIR)/bin
+	RUNNER='$(CHECK_RUNNER)' scripts/check-layer.sh $(LAYER_DIR)
 
 # template.yaml points at build/layer; the per-architecture copy points at its own layer directory.
 build/$(ARCH)/template.yaml: template.yaml

@@ -2,7 +2,7 @@
 
 This document describes how the FFmpeg Lambda layer in this repository is **built, packaged, published,
 and consumed** — there is no request-processing runtime of its own to diagram, since the repo's only output
-is a Lambda layer version (a `.zip` of static binaries plus CloudFormation/SAR metadata), not a service.
+is a Lambda layer version (a `.zip` of glibc-linked FFmpeg binaries and their shared libraries plus CloudFormation/SAR metadata), not a service.
 
 See [CLAUDE.md](../CLAUDE.md) for the full project overview, conventions, and open questions
 (in particular the [upstream-vs-fork identity question](../CLAUDE.md#upstream-vs-fork-identity-open-question)
@@ -23,12 +23,12 @@ request-time, so they are covered briefly below instead of in a separate documen
 ```mermaid
 flowchart TD
     subgraph SRC["Upstream binary source (not in this repo)"]
-        BTBN["BtbN/FFmpeg-Builds dated autobuild release<br/>linux64-gpl and linuxarm64-gpl, 8.1 branch<br/>(pinned tag, asset and SHA-256 in versions.mk)"]
+        BTBN["BtbN/FFmpeg-Builds dated autobuild release<br/>linux64-gpl-shared and linuxarm64-gpl-shared, 8.1 branch<br/>(pinned tag, asset and SHA-256 in versions.mk)"]
     end
 
     subgraph REPO["This repo: local build (no CI)"]
         FETCH["make build ARCH=x86_64|arm64<br/>curl, sha256sum -c, tar x<br/>(rebuilds when versions.mk changes)"]
-        BIN["build/ARCH/layer/bin/<br/>ffmpeg, ffprobe"]
+        BIN["build/ARCH/layer/<br/>bin/ffmpeg, bin/ffprobe, lib/*.so.N"]
         CHK["make check<br/>scripts/check-layer.sh"]
         TPL["template.yaml<br/>AWS::Serverless::LayerVersion<br/>+ AWS::ServerlessRepo::Application metadata"]
         PKG["aws cloudformation package<br/>uploads build/ARCH/layer to S3"]
@@ -69,7 +69,8 @@ Notes on the diagram:
 - The FFmpeg binary source is a **pinned, dated BtbN release** for each architecture. `versions.mk` holds
   the release tag, the asset names and the SHA-256 of each, and the `Makefile` stops before extracting if a
   download does not match. Two builds on different days package the same binaries.
-- `make check` converts an irregular-timestamp WebM to MP4 with the bundled `ffmpeg` and fails if the output
+- `make check` first fails if the layer is over 240,000,000 bytes unzipped, contains a symlink, or has a
+  library `ldd` cannot resolve; it then converts an irregular-timestamp WebM to MP4 with the bundled `ffmpeg` and fails if the output
   does not hold 95-100% of the input frames (FFmpeg 7.0.2 and older duplicate them; 7.1 and later do not). Source: Regula-Face-API-Deployment [issue #36](https://github.com/Greengate-Fintech/Regula-Face-API-Deployment/issues/36), third comment (4.4.1, 6.1.1, 7.0.2 duplicate; 7.1, 7.1.1, 8.0, 8.0.1 do not), and this repo's own check (7.0.2: 10390 frames from 300; 8.1.3: 300).
 - **To bump FFmpeg**, edit `versions.mk` (a newer autobuild on a release branch, hashes from that release's
   `checksums.sha256`), run `make check` for both architectures, then publish both layers.
@@ -116,8 +117,8 @@ steps going wrong, not about message redelivery or retries:
 | Failure mode | Cause | Effect | Mitigation in this repo |
 |---|---|---|---|
 | Changed download | The BtbN asset for the pinned tag differs from the hash in `versions.mk` (or is deleted: BtbN removes old autobuilds) | `make build` stops at `sha256sum -c` before extracting; nothing reaches AWS | The hash check detects any change to the asset after pinning; the pinned hashes were cross-checked against BtbN's published `checksums.sha256` at pin time. It does not prove BtbN's own build is trustworthy. If the release has been removed, bump `versions.mk` to a current release (see above) |
-| Upstream URL unavailability | `curl` to `github.com` fails (network issue) | `make deploy` fails at the `build/ARCH/layer/bin/ffmpeg` step before anything reaches AWS; no partial layer is deployed, since `mv` is the last step | A failed `curl` or hash check leaves no `build/ARCH/layer/bin/ffmpeg`, so the next run retries cleanly |
-| Limited automated tests, no CI | `make check` covers the frame-count behaviour only; no `.github/workflows/` | A change to `template.yaml` (e.g. a bad `ContentUri`) is only caught by a human running `make deploy` against a real AWS account, or by the consuming Lambda failing at cold start (`ENOENT: /opt/bin/ffmpeg`) | `make check` for the binaries; none for the template. Any CI addition should be scoped deliberately |
+| Upstream URL unavailability | `curl` to `github.com` fails (network issue) | `make deploy` fails at the `build/ARCH/layer/bin/ffmpeg` step before anything reaches AWS; no partial layer is deployed, since moving `bin/` into the layer is the last step | A failed `curl` or hash check leaves no `build/ARCH/layer/bin/ffmpeg`, so the next run retries cleanly |
+| Limited automated tests, no CI | `make check` covers layer size, library resolution and the frame-count behaviour only; no `.github/workflows/` | A change to `template.yaml` (e.g. a bad `ContentUri`) is only caught by a human running `make deploy` against a real AWS account, or by the consuming Lambda failing at cold start (`ENOENT: /opt/bin/ffmpeg`) | `make check` for the binaries; none for the template. Any CI addition should be scoped deliberately |
 | Runtime and glibc compatibility | `template.yaml` declares `nodejs24.x`, `nodejs22.x`, `python3.13`; the BtbN binaries need glibc 2.28 or later | The layer works on Amazon Linux 2023 runtimes and fails with a glibc error on Amazon Linux 2 runtimes | Declared runtimes are Amazon Linux 2023 only |
 | Cross-account ARN drift | A layer version deployed via `make deploy` is account/region-specific (`arn:aws:lambda:REGION:ACCOUNT:layer:ffmpeg:N`) | If this repo is redeployed into a *different* account than a consumer expects (e.g. a new environment), the consumer's hard-coded ARN (see `Regula-Face-API-Deployment/lib/constants.ts`) will not resolve — there is no cross-account/cross-region layer sharing configured anywhere in this repo's `template.yaml` | None — `AWS::Serverless::LayerVersion` here has no `LayerPermission`/cross-account grant resource; if cross-account sharing is ever needed, that is new work, not an existing capability |
 
