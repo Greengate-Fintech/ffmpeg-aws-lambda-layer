@@ -1,5 +1,22 @@
 # Instructions for AI agents working on this codebase
 
+## Read first: this is a public repository
+
+This repository is a public fork of an open-source project. Anything you write here is published to
+everyone, permanently: files, commit messages, branch names, PR titles and descriptions, issues and
+review comments. Git history cannot be taken back.
+
+- **Write it as generic open-source documentation.** Describe the layer and how anyone would use it.
+- **Never include:** the name of the organisation hosting this fork, its AWS account IDs, internal
+  repositories, systems, consumers, people, customers, private issue or ticket links, internal hostnames,
+  or any secret. If a change is motivated by an internal problem, describe the public, technical cause
+  (for example "ffmpeg 7.0.x duplicates frames on variable-frame-rate WebM") instead.
+- **Keep internal context in the consuming project**, where its own repository and tracker are private.
+- **Licensing:** this repository's files are MIT (see `LICENSE.txt`); a built layer is GPL 3.0 or later.
+  Do not change licence statements without updating `LICENSE.txt`, `README.md` and `template.yaml`
+  together, and do not describe the built layer as MIT or LGPL.
+- **If you are unsure whether something is internal, leave it out and ask.**
+
 ## Project Overview
 
 `ffmpeg-aws-lambda-layer` packages a shared-library build of **FFmpeg**/**FFprobe** (glibc-linked, needs glibc 2.28 or later; from
@@ -182,11 +199,7 @@ pattern `example/src/index.js` shows.
 
 ## Security & Boundaries
 
-- **This is a public repository (a fork of an open-source project).** Every commit, branch, PR description
-  and review comment is visible to anyone and is published under the MIT terms in `LICENSE.txt`. Never add
-  internal or confidential information: no secrets, internal hostnames, customer data, private issue
-  content, or details of internal systems beyond what is needed to use the layer. This includes naming
-  the organisation that hosts the fork, its AWS accounts, its internal systems or its consumers.
+- **Public repository:** see [Read first](#read-first-this-is-a-public-repository) at the top of this file.
 - **Keep `LICENSE.txt` accurate** when the build source or its configure flags change: it states the
   MIT terms for this repo's files and the GPL 3.0-or-later status of a built layer.
 - **Never commit the fetched FFmpeg tarball, extracted binaries, or anything under `build/`** — already

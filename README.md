@@ -71,6 +71,10 @@ For more information on using FFmpeg and FFprobe, check out <https://ffmpeg.org/
 
 Gojko Adzic <https://gojko.net>
 
+## Contributing
+
+This is a public fork. Contributions are published under the MIT terms in [LICENSE.txt](LICENSE.txt). Keep commits, pull requests and issues free of anything private to your organisation (account IDs, internal systems or projects, customer data, secrets); describe changes by their public technical cause. Run `make check ARCH=x86_64` and `make check ARCH=arm64` before opening a pull request.
+
 ## License
 
 This is a public fork of [serverlesspub/ffmpeg-aws-lambda-layer](https://github.com/serverlesspub/ffmpeg-aws-lambda-layer): every change committed here is published openly. See [LICENSE.txt](LICENSE.txt) for the full terms and disclaimer.
