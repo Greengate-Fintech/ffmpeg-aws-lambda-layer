@@ -2,13 +2,13 @@
 
 This repository is a public fork of
 [serverlesspub/ffmpeg-aws-lambda-layer](https://github.com/serverlesspub/ffmpeg-aws-lambda-layer).
-Everything committed here, including Greengate Fintech's modifications, is published openly under the
+Everything committed here, including this fork's modifications, is published openly under the
 terms below.
 
 ### This repository's own files (scripts, Makefile, templates, documentation)
 
 Released under the MIT Licence. The original work is by the serverlesspub/ffmpeg-aws-lambda-layer
-contributors. Modifications are Copyright (c) 2026 Greengate Fintech.
+contributors. Modifications are Copyright (c) 2026 the contributors to this fork.
 
 > Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
 > associated documentation files (the "Software"), to deal in the Software without restriction,
