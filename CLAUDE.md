@@ -3,7 +3,7 @@
 ## Project Overview
 
 `ffmpeg-aws-lambda-layer` packages a static-binary build of **FFmpeg**/**FFprobe** (from
-[John Van Sickle's static builds](https://johnvansickle.com/ffmpeg/)) as an **AWS Lambda layer**, using
+[BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), pinned in `versions.mk`) as an **AWS Lambda layer**, using
 AWS SAM (`AWS::Serverless-2016-10-31`). It is a **build/publish artefact repository**, not a running
 service: there is no handler code here that executes on every invocation of some Lambda — the only
 "product" is the layer's `.zip` content (`ffmpeg`/`ffprobe` binaries under `bin/`) and the
@@ -38,38 +38,47 @@ the layer is a manual, local operation using the AWS CLI (see [Build & Publish](
 | Aspect | Detail |
 |---|---|
 | Packaging | AWS SAM (`template.yaml`), one resource: `AWS::Serverless::LayerVersion` |
-| Binary source | `https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz` — fetched on a clean build (fresh checkout / after `make clean`); Make skips the fetch when the binary already exists in `build/`, not vendored/pinned in this repo |
-| FFmpeg version bundled | 4.1.3, per `template.yaml`'s `Metadata.AWS::ServerlessRepo::Application.Description` and `README-SAR.md` — this is a **documentation claim, not an enforced pin** (see [Build & Publish](#build--publish)) |
-| Compatible runtimes | `nodejs10.x`, `python3.6`, `ruby2.5`, `java8`, `go1.x` (`template.yaml`'s `CompatibleRuntimes`) — all now end-of-life/deprecated Lambda runtimes; the layer's binary content is runtime-agnostic (any Amazon Linux 2 Lambda can use it), but the declared compatibility list has not been updated since the original 2019 publish |
+| Binary source | A dated BtbN/FFmpeg-Builds autobuild release (`autobuild-YYYY-MM-DD-HH-MM`), GPL variant, release branch 8.1, one asset per architecture. The release tag, asset names and SHA-256 hashes are in `versions.mk`; the `Makefile` verifies the hash before extracting. No `latest` URL is used anywhere |
+| FFmpeg version bundled | Set by `versions.mk` (`n8.1.3-17-gc389840894` at the time of writing, the same for x86_64 and arm64). Confirm with `build/<arch>/layer/bin/ffmpeg -version`. FFmpeg 7.1+ is required: earlier versions duplicate frames when converting browser-recorded WebM to MP4 without a frame-rate option |
+| Architectures | `x86_64` (stack `ffmpeg-lambda-layer`, layer `ffmpeg`) and `arm64` (stack `ffmpeg-arm64-lambda-layer`, layer `ffmpeg-arm64`), chosen with `make ... ARCH=` |
+| Compatible runtimes | `nodejs24.x`, `nodejs22.x`, `python3.13` (`template.yaml`'s `CompatibleRuntimes`). The binaries are dynamically linked against glibc (needs 2.28 or later), so they suit Amazon Linux 2023 runtimes and not Amazon Linux 2 |
 | Distribution | AWS Serverless Application Repository (SAR), application `ffmpeg-lambda-layer` — see [Upstream vs. fork identity](#upstream-vs-fork-identity-open-question) |
-| Licence | Layer packaging (this repo's scripts): MIT. FFmpeg itself: GPLv2.1; John Van Sickle's static build: GPLv3 (see `LICENSE.txt`, `README.md`) |
-| Output location | `AWS::Serverless::LayerVersion` in `build/layer` (Makefile fetches binaries there before `sam`/`cloudformation package` runs) |
+| Licence | Layer packaging (this repo's scripts): MIT. FFmpeg itself: GPLv2.1; the BtbN GPL build: GPLv3 (see `LICENSE.txt`, `README.md`) |
+| Output location | `AWS::Serverless::LayerVersion` from `build/<arch>/layer` (the Makefile fetches and verifies binaries there before `cloudformation package` runs) |
 
 Full build/publish/consume flow, including a diagram: [docs/architecture.md](docs/architecture.md).
 
 ## Build & Publish
 
 ```bash
-make deploy DEPLOYMENT_BUCKET=<your-s3-bucket>       # build + package + deploy the layer stack
+make build ARCH=x86_64                               # download, verify SHA-256 and extract (ARCH: x86_64 | arm64)
+make check ARCH=x86_64                               # build, then run scripts/check-layer.sh against the binaries
+make deploy ARCH=x86_64 DEPLOYMENT_BUCKET=<your-s3-bucket>   # build + package + deploy the layer stack
 make deploy-example DEPLOYMENT_BUCKET=<your-s3-bucket>   # build + deploy the example consumer stack
 make clean                                            # remove build/ (forces a re-fetch of the FFmpeg tarball)
 ```
 
-There is no `make test`, `make lint`, or `make build` target that runs independently of `deploy` — `make
-deploy` is the only entry point, and it always re-downloads the FFmpeg tarball on a clean `build/` (see
-`Makefile`'s `build/layer/bin/ffmpeg` target). There are no automated tests in this repository.
+`make check` is the only test. It generates a WebM with irregular timestamps (a 1 ms time base, as browsers
+record), converts it with a plain `-f mp4` and requires the output to hold 95-100% of the input frames.
+FFmpeg 7.0.2 (the previous build source) fails it with about 10,000 frames from 300. For `ARCH=arm64` on
+an x86_64 host the binaries run in an `amazonlinux:2023` container under QEMU (see `README.md`).
 
 Key `Makefile` targets, in dependency order:
-1. `build/layer/bin/ffmpeg` — `curl`s the **latest** `ffmpeg-release-amd64-static.tar.xz` from John Van
-   Sickle's site and extracts `ffmpeg`/`ffprobe` into `build/layer/bin/`. **This target is not tied to any
-   specific FFmpeg release** — "latest" as of the wire is whatever John Van Sickle's server currently serves,
-   not necessarily the 4.1.3 documented in `README.md`/`README-SAR.md`/`template.yaml`. Re-running `make
-   deploy` after a `make clean` can silently pull in a newer FFmpeg build than the one the repo's own
-   documentation and SAR listing claim to ship.
-2. `build/output.yaml` — `aws cloudformation package` uploads `build/layer` to `$(DEPLOYMENT_BUCKET)` and
-   rewrites `template.yaml`'s `ContentUri` to the resulting S3 object.
-3. `deploy` — `aws cloudformation deploy` of the packaged template, stack name `$(STACK_NAME)` (default
-   `ffmpeg-lambda-layer`), then prints the stack's `Outputs` (the layer's `LayerVersion` ARN).
+1. `build/<arch>/layer/bin/ffmpeg` — downloads the asset named in `versions.mk` for `$(ARCH)`, stops if its
+   SHA-256 differs (`SHA256` can be overridden to test that), then extracts `ffmpeg`/`ffprobe` into
+   `build/<arch>/layer/bin/`.
+2. `build/<arch>/output.yaml` — `aws cloudformation package` uploads `build/<arch>/layer` to
+   `$(DEPLOYMENT_BUCKET)` and rewrites the `ContentUri` of a per-architecture copy of `template.yaml`.
+3. `deploy` — `aws cloudformation deploy` of the packaged template with `LayerName` and `Architecture`
+   parameter overrides, stack name `$(STACK_NAME)` (`ffmpeg-lambda-layer` for x86_64,
+   `ffmpeg-arm64-lambda-layer` for arm64), then prints the stack's `Outputs` (the layer's `LayerVersion` ARN).
+
+### Bumping FFmpeg
+
+Edit `versions.mk` only: choose a newer BtbN `autobuild-*` release on a release branch (`n8.x`, never
+`master`), copy the `linux64-gpl` and `linuxarm64-gpl` asset names and hashes from that release's
+`checksums.sha256`, run `make check` for both architectures from a clean `build/`, then publish both layers.
+Publishing creates a new layer version, so the consumer's ARN must be bumped separately.
 
 Publishing a new **SAR** application version (as opposed to a plain private CloudFormation stack deploy) is
 a separate, manual step not scripted anywhere in this repo — see the open question below.
@@ -143,7 +152,10 @@ source directly (there is no package/module import relationship — only "some A
 
 No other repository under `/home/user/` (searched exhaustively for `ffmpeg`, `ffprobe`, `FFMPEG_LAYER`, and
 `serverlessrepo`, case-insensitive) references this layer, an FFmpeg binary, or the upstream SAR
-application. Because `Regula-Face-API-Deployment` pins layer **version 1** by ARN, a new layer version
+application. The pinned FFmpeg 8.x build in this repo is published as `layer:ffmpeg:2` (x86_64) and `layer:ffmpeg-arm64:1`
+(arm64) in each account (the publish is done by a person, not by an agent). `Regula-Face-API-Deployment` is
+then changed to attach those ARNs. Until that happens, it still uses the old `:1`.
+Because `Regula-Face-API-Deployment` pins layer **version 1** by ARN, a new layer version
 published from this repo does **not** automatically propagate to that consumer — it would need its own CDK
 change to bump the `:1` suffix. Keep this in mind before assuming "publish a new version here" is
 sufficient to ship an FFmpeg update anywhere else in the org.
@@ -159,7 +171,7 @@ sufficient to ship an FFmpeg update anywhere else in the org.
   existing upstream README text is US-spelled in places (e.g. "License") and is left as-is rather than
   rewritten wholesale, per the "improve/reconcile only for real gaps" scope of this documentation pass.
 - **Do not vendor or commit the fetched FFmpeg tarball or extracted binaries.** `build/` is `.gitignore`d;
-  the Makefile always fetches fresh from John Van Sickle's site.
+  the Makefile always fetches from BtbN's GitHub release and checks the SHA-256 in `versions.mk`.
 - **Treat `README.md` (root, MIT-focused, general usage) and `README-SAR.md` (SAR-listing-focused, shown
   inside the AWS Serverless Application Repository console) as two different audiences for the same
   artefact, not duplicates to be merged.** `template.yaml`'s `Metadata.AWS::ServerlessRepo::Application.ReadmeUrl`
@@ -170,14 +182,15 @@ sufficient to ship an FFmpeg update anywhere else in the org.
 - **The `LGPL version` pointer in `README.md`** (a community fork at
   `giusedroid/ffmpeg-aws-lambda-layer` on the `license/lgpl` branch, containing only LGPL-licensed FFmpeg
   components) is there for organisations concerned about GPL licensing obligations. This repo's own default
-  build is **GPL** (per `template.yaml`'s `LicenseInfo: GPL-2.0-or-later` and the John Van Sickle static
-  build being GPLv3) — do not remove that pointer or imply this repo's own layer is LGPL-clean.
+  build is **GPL** (per `template.yaml`'s `LicenseInfo: GPL-2.0-or-later` and the BtbN GPL build being GPLv3) — do not remove that pointer or imply this repo's own layer is LGPL-clean.
 
 ## Key Files
 
 - `template.yaml` — the SAM template; the single `AWS::Serverless::LayerVersion` resource plus the
   `AWS::ServerlessRepo::Application` metadata block that drives the SAR listing.
-- `Makefile` — fetch FFmpeg → package → deploy. See [Build & Publish](#build--publish).
+- `versions.mk` — the pinned BtbN release, asset names and SHA-256 hashes per architecture.
+- `Makefile` — fetch and verify FFmpeg → check → package → deploy, per `ARCH`. See [Build & Publish](#build--publish).
+- `scripts/check-layer.sh` — functional check (frame count on irregular-timestamp WebM → MP4) run by `make check`.
 - `README.md` — GitHub-facing usage/build/deploy/licensing doc.
 - `README-SAR.md` — short description rendered inside the AWS Serverless Application Repository console
   (referenced by `template.yaml`'s `ReadmeUrl`).
@@ -193,18 +206,15 @@ sufficient to ship an FFmpeg update anywhere else in the org.
   and, as an inherited fork, has not been renamed).
 - Remote `origin` → GitHub (`Greengate-Fintech/ffmpeg-aws-lambda-layer`)
 - No GitHub Actions workflows exist in this repository (no `.github/` directory at all) — there is no CI
-  gate; validate any change by running `make deploy` against a real AWS account before merging.
+  gate; run `make check ARCH=x86_64` and `make check ARCH=arm64` for any change to the build, and validate template changes by running `make deploy` against a real AWS account before merging.
 
 ## Security & Boundaries
 
 - **Never commit the fetched FFmpeg tarball, extracted binaries, or anything under `build/`** — already
   `.gitignore`d; keep it that way.
-- **Never assume the bundled FFmpeg version is pinned.** The Makefile always fetches
-  `ffmpeg-release-amd64-static.tar.xz` (John Van Sickle's rolling "latest static build" alias, not a
-  version-numbered URL) — the documented "4.1.3" in `README.md`/`README-SAR.md`/`template.yaml` reflects
-  whatever was current when those files were last written, not a guarantee about what a fresh `make deploy`
-  will actually package today. If you need version-pinning or reproducible builds, that is a real gap in
-  this repo's current design, not a solved problem — do not describe it as pinned in new documentation.
+- **Keep the FFmpeg build pinned and hash-verified.** `versions.mk` names one dated BtbN release and a
+  SHA-256 per architecture. Never replace them with a `latest` or `master` URL, and never skip the hash
+  check. Both architectures must use the same FFmpeg version.
 - **Never point `example/template-sar.yaml` (or any new consumer template) at the upstream third-party SAR
   application ARN (`arn:aws:serverlessrepo:us-east-1:145266761615:...`) as if it were Greengate-Fintech's
   own** — see [Upstream vs. fork identity](#upstream-vs-fork-identity-open-question). If that ARN is still

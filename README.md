@@ -1,6 +1,6 @@
 # FFmpeg/FFprobe for AWS Lambda
 
-A Lambda layer containing a static version of FFmpeg/FFprobe utilities from the [`FFmpeg`](https://www.ffmpeg.org/) Linux package, compatible with Amazon Linux 2.x and Amazon Linux 1.x instances (including the `nodejs10.x` runtime, and the updated 2018.03 Amazon Linux 1 runtimes). 
+A Lambda layer containing a static version of FFmpeg/FFprobe utilities from the [`FFmpeg`](https://www.ffmpeg.org/) Linux package, built for Amazon Linux 2023 based Lambda runtimes (`nodejs24.x`, `nodejs22.x`, `python3.13`) on both `x86_64` and `arm64`. The binaries need glibc 2.28 or later, so they do not run on Amazon Linux 2 runtimes.
 
 > This README covers general usage, building, and manual deployment. [`README-SAR.md`](README-SAR.md) is a
 > shorter, separate description rendered by the AWS Serverless Application Repository console itself (see
@@ -24,23 +24,35 @@ For manual deployments and custom builds, read below...
 
 ## Deploying to AWS as a layer
 
-This package includes FFmpeg 4.1.3, packaged by John Van Sickle. Please consider supporting him for maintaining statically built FFmpeg packages. For more information, check out <https://johnvansickle.com/ffmpeg/>
+This package bundles a pinned FFmpeg 8.1 release-branch build (GPL variant, with libx264 and libvpx) from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), one build per architecture. The exact dated release, asset names and SHA-256 hashes are in [`versions.mk`](versions.mk). The `Makefile` verifies the SHA-256 of each download before it extracts anything, and no URL in this repository points at a "latest" alias.
 
-Note that the `Makefile` always fetches John Van Sickle's *latest* static build (a rolling release alias,
-not a version-pinned URL), so a fresh build on a clean checkout may package a newer FFmpeg version than the
-4.1.3 described here — see [`docs/architecture.md`](docs/architecture.md#buildpublish-failure-modes).
+FFmpeg 7.1 and later keep every input frame when converting variable-frame-rate input (such as a browser-recorded WebM) to MP4 without a frame-rate option. Earlier versions, including 7.0.2 from the previous build source, duplicate frames in that case. `scripts/check-layer.sh` tests exactly that.
 
-The output will be in the `build` dir (`build/layer/bin/` for the extracted binaries, `build/output.yaml` for the packaged CloudFormation template).
-
-Run the following command to deploy the compiled result as a layer in your AWS account.
+The output is under `build/<arch>/` (`layer/bin/` for the extracted binaries, `output.yaml` for the packaged CloudFormation template).
 
 ```
-make deploy DEPLOYMENT_BUCKET=<YOUR BUCKET NAME>
+make build ARCH=x86_64               # download, verify and extract (ARCH is x86_64 or arm64; default x86_64)
+make check ARCH=x86_64               # build, then run the functional check against the binaries
+make deploy ARCH=x86_64 DEPLOYMENT_BUCKET=<YOUR BUCKET NAME>
+make deploy ARCH=arm64 DEPLOYMENT_BUCKET=<YOUR BUCKET NAME>
 ```
+
+On an x86_64 host, `make check ARCH=arm64` runs the arm64 binaries in an `amazonlinux:2023` container under QEMU. That needs Docker with arm64 emulation (`docker run --privileged --rm tonistiigi/binfmt --install arm64`). Set `DOCKER="sudo docker"` if Docker needs `sudo`.
 
 ### configuring the deployment
 
-By default, this uses `ffmpeg-lambda-layer` as the stack name. Provide a `STACK_NAME` variable when calling `make deploy` to use an alternative name.
+| `ARCH` | Stack name | Layer name |
+|---|---|---|
+| `x86_64` (default) | `ffmpeg-lambda-layer` | `ffmpeg` |
+| `arm64` | `ffmpeg-arm64-lambda-layer` | `ffmpeg-arm64` |
+
+Provide `STACK_NAME` or `LAYER_NAME` when calling `make deploy` to use alternative names. `LayerName` and `Architecture` are passed to `template.yaml` as parameter overrides.
+
+### bumping FFmpeg
+
+1. Pick a BtbN `autobuild-YYYY-MM-DD-HH-MM` release whose assets are on a release branch (`n8.x`, suffix `-8.x`), never `master`.
+2. Read that release's `checksums.sha256` and copy the `linux64-gpl` and `linuxarm64-gpl` asset names and hashes into `versions.mk`.
+3. Run `make check ARCH=x86_64` and `make check ARCH=arm64` from a clean `build/`, then publish both layers.
 
 ### example usage
 
@@ -59,7 +71,7 @@ Gojko Adzic <https://gojko.net>
 ## License
 
 * These scripts: [MIT](https://opensource.org/licenses/MIT)
-* FFmpeg: GPLv2.1 <http://ffmpeg.org/legal.html>, John Van Sickle's static build GPL v3 <https://johnvansickle.com/ffmpeg/>
+* FFmpeg: GPLv2.1 <http://ffmpeg.org/legal.html>, the BtbN GPL build is GPLv3 <https://github.com/BtbN/FFmpeg-Builds>
 
 ## LGPL version
 

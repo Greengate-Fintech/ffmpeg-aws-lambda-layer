@@ -23,29 +23,31 @@ request-time, so they are covered briefly below instead of in a separate documen
 ```mermaid
 flowchart TD
     subgraph SRC["Upstream binary source (not in this repo)"]
-        JVS["johnvansickle.com static builds<br/>ffmpeg-release-amd64-static.tar.xz<br/>(rolling latest, not version-pinned)"]
+        BTBN["BtbN/FFmpeg-Builds dated autobuild release<br/>linux64-gpl and linuxarm64-gpl, 8.1 branch<br/>(pinned tag, asset and SHA-256 in versions.mk)"]
     end
 
     subgraph REPO["This repo: local build (no CI)"]
-        FETCH["make deploy<br/>curl + tar x"]
-        BIN["build/layer/bin/<br/>ffmpeg, ffprobe"]
+        FETCH["make build ARCH=x86_64|arm64<br/>curl, sha256sum -c, tar x"]
+        BIN["build/ARCH/layer/bin/<br/>ffmpeg, ffprobe"]
+        CHK["make check<br/>scripts/check-layer.sh"]
         TPL["template.yaml<br/>AWS::Serverless::LayerVersion<br/>+ AWS::ServerlessRepo::Application metadata"]
-        PKG["aws cloudformation package<br/>uploads build/layer to S3"]
+        PKG["aws cloudformation package<br/>uploads build/ARCH/layer to S3"]
     end
 
     subgraph AWS["Target AWS account (operator-supplied)"]
         S3B["S3: DEPLOYMENT_BUCKET"]
-        CFN["aws cloudformation deploy<br/>stack: ffmpeg-lambda-layer (default)"]
-        LAYER["Lambda Layer Version<br/>arn:aws:lambda:REGION:ACCOUNT:layer:ffmpeg:N"]
+        CFN["aws cloudformation deploy<br/>stack: ffmpeg-lambda-layer (x86_64)<br/>or ffmpeg-arm64-lambda-layer (arm64)"]
+        LAYER["Lambda Layer Version<br/>arn:aws:lambda:REGION:ACCOUNT:layer:ffmpeg:N<br/>or layer:ffmpeg-arm64:N"]
     end
 
     subgraph SAR["AWS Serverless Application Repository (unconfirmed for this fork)"]
         SARAPP["SAR application: ffmpeg-lambda-layer<br/>upstream ARN account 145266761615"]
     end
 
-    JVS -->|"curl (every clean build)"| FETCH
+    BTBN -->|"curl (every clean build)"| FETCH
     FETCH --> BIN
-    BIN --> TPL
+    BIN --> CHK
+    CHK --> TPL
     TPL --> PKG
     PKG --> S3B
     S3B --> CFN
@@ -64,9 +66,13 @@ Notes on the diagram:
   re-published as Greengate-Fintech's own SAR application (as opposed to consumers using the original
   `serverlesspub`-owned SAR listing, account `145266761615`) is unconfirmed — see
   [CLAUDE.md's open question](../CLAUDE.md#upstream-vs-fork-identity-open-question).
-- The FFmpeg binary source is a **rolling "latest static build" URL**, not a version-pinned release archive.
-  Two `make deploy` runs on different days can package different FFmpeg versions even though nothing in this
-  repo's own source changed — see [Build/publish failure modes](#buildpublish-failure-modes) below.
+- The FFmpeg binary source is a **pinned, dated BtbN release** for each architecture. `versions.mk` holds
+  the release tag, the asset names and the SHA-256 of each, and the `Makefile` stops before extracting if a
+  download does not match. Two builds on different days package the same binaries.
+- `make check` converts an irregular-timestamp WebM to MP4 with the bundled `ffmpeg` and fails if the output
+  does not hold 95-100% of the input frames (FFmpeg 7.0.2 and older duplicate them; 7.1 and later do not).
+- **To bump FFmpeg**, edit `versions.mk` (a newer autobuild on a release branch, hashes from that release's
+  `checksums.sha256`), run `make check` for both architectures, then publish both layers.
 
 ## Consumption Flow (confirmed real consumer)
 
@@ -90,7 +96,7 @@ sequenceDiagram
     Fn->>S3: upload converted file, mark metadata converted=1
 ```
 
-`Regula-Face-API-Deployment` pins a specific layer **version** (`:1`) by ARN
+`Regula-Face-API-Deployment` pins a specific layer **version** (`:1` at the time of writing; the 8.x layers are `ffmpeg:2` and `ffmpeg-arm64:1`) by ARN
 (`lib/regula-face-api-s3-bucket-stack.ts:121-125`, `lib/constants.ts:88,109`) in its own non-prod
 (`921483706620`) and prod (`772479554838`) accounts, region `ap-southeast-2`. Publishing a new layer version
 from this repo does **not** automatically reach that consumer — it requires a separate CDK change in
@@ -109,10 +115,10 @@ steps going wrong, not about message redelivery or retries:
 
 | Failure mode | Cause | Effect | Mitigation in this repo |
 |---|---|---|---|
-| Unpinned FFmpeg version drift | `Makefile`'s `build/layer/bin/ffmpeg` target always fetches `ffmpeg-release-amd64-static.tar.xz` — a rolling alias for John Van Sickle's latest static build, not a version-numbered URL | A fresh `make deploy` (after `make clean`, or on a machine with no prior `build/`) can silently package a newer FFmpeg than the "4.1.3" documented in `README.md`/`README-SAR.md`/`template.yaml`'s SAR metadata | None currently — this is a real, undocumented-until-now gap; see `CLAUDE.md`'s security note. There is no lockfile/checksum pin |
-| Upstream URL unavailability | `curl` to `johnvansickle.com` fails (network issue, upstream site down/restructured) | `make deploy` fails at the `build/layer/bin/ffmpeg` step before anything reaches AWS; no partial/corrupt layer is deployed, since the Makefile target only completes atomically (`mv` at the end) | The `mv` at the end of the target means a failed/interrupted `curl \| tar x` leaves no `build/layer/bin/ffmpeg`, so a subsequent `make deploy` retries cleanly rather than deploying a partial binary |
-| No automated tests or CI | No `.github/workflows/`, no test suite | A change to `template.yaml` (e.g. a typo in `CompatibleRuntimes`, a bad `ContentUri`) is only caught by a human running `make deploy` against a real AWS account, or by the eventual consuming Lambda failing at cold start (`Cannot find module`/`ENOENT: /opt/bin/ffmpeg`) | None — this is an accepted trade-off for a low-change-frequency artefact repo, not a gap to "fix" reflexively; any CI addition should be scoped deliberately (see Open Questions) |
-| Stale `CompatibleRuntimes` declaration | `template.yaml`'s `CompatibleRuntimes` lists `nodejs10.x`, `python3.6`, `ruby2.5`, `java8`, `go1.x` — all now deprecated/end-of-life Lambda runtimes as of this fork's last edit | AWS Lambda layer compatibility declarations are advisory metadata only (Lambda does not currently enforce them for use, but the console UI surfaces them, and SAR's version-search filters by them) — a consumer on a current runtime (e.g. Node.js 24.x, as `Regula-Face-API-Deployment`'s `ConvertFileFunction` uses) is unaffected in practice, but the declared list no longer reflects reality | None — flagged here so a future SAR republish updates this list rather than perpetuating it unexamined |
+| Tampered or changed download | The BtbN asset for the pinned tag differs from the hash in `versions.mk` (or is deleted: BtbN removes old autobuilds) | `make build` stops at `sha256sum -c` before extracting; nothing reaches AWS | The hash check. If the release has been removed, bump `versions.mk` to a current release (see above) |
+| Upstream URL unavailability | `curl` to `github.com` fails (network issue) | `make deploy` fails at the `build/ARCH/layer/bin/ffmpeg` step before anything reaches AWS; no partial layer is deployed, since `mv` is the last step | A failed `curl` or hash check leaves no `build/ARCH/layer/bin/ffmpeg`, so the next run retries cleanly |
+| Limited automated tests, no CI | `make check` covers the frame-count behaviour only; no `.github/workflows/` | A change to `template.yaml` (e.g. a bad `ContentUri`) is only caught by a human running `make deploy` against a real AWS account, or by the consuming Lambda failing at cold start (`ENOENT: /opt/bin/ffmpeg`) | `make check` for the binaries; none for the template. Any CI addition should be scoped deliberately |
+| Runtime and glibc compatibility | `template.yaml` declares `nodejs24.x`, `nodejs22.x`, `python3.13`; the BtbN binaries need glibc 2.28 or later | The layer works on Amazon Linux 2023 runtimes and fails with a glibc error on Amazon Linux 2 runtimes | Declared runtimes are Amazon Linux 2023 only |
 | Cross-account ARN drift | A layer version deployed via `make deploy` is account/region-specific (`arn:aws:lambda:REGION:ACCOUNT:layer:ffmpeg:N`) | If this repo is redeployed into a *different* account than a consumer expects (e.g. a new environment), the consumer's hard-coded ARN (see `Regula-Face-API-Deployment/lib/constants.ts`) will not resolve — there is no cross-account/cross-region layer sharing configured anywhere in this repo's `template.yaml` | None — `AWS::Serverless::LayerVersion` here has no `LayerPermission`/cross-account grant resource; if cross-account sharing is ever needed, that is new work, not an existing capability |
 
 ## Open Questions
@@ -123,11 +129,3 @@ steps going wrong, not about message redelivery or retries:
 > SAR entirely) — see [CLAUDE.md](../CLAUDE.md#upstream-vs-fork-identity-open-question). The confirmed
 > consumer's ARN shape (a plain regional Lambda layer ARN, not a SAR application reference) is consistent
 > with the latter, but this is not verified against deployment history.
-
-> **TODO(owner):** Whether FFmpeg version pinning (e.g. downloading a specific dated/versioned release archive
-> rather than the rolling "latest static build" alias) is worth adding, given the layer is GPL-licensed
-> third-party binary content with no automated test coverage of the packaged binaries' behaviour.
-
-> **TODO(owner):** Whether `template.yaml`'s `CompatibleRuntimes` list should be refreshed to current Lambda
-> runtimes on the next SAR republish (informational only today, per the failure-mode table above — not
-> blocking current usage).
