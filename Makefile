@@ -37,7 +37,8 @@ clean:
 # as a regular file named by its soname (libavcodec.so.62), which is what the binaries
 # load. The .so and full-version names are symlinks, and aws cloudformation package
 # would zip each link as another full copy. bin/ moves in last, so a failed build
-# leaves no bin/ffmpeg and the next run starts again.
+# leaves no bin/ffmpeg and the next run starts again. The tarball's file dates predate
+# versions.mk, so bin/ffmpeg is touched to mark the build current.
 $(LAYER_DIR)/bin/ffmpeg: versions.mk
 	rm -rf build/$(ARCH)/extract $(LAYER_DIR)
 	mkdir -p build/$(ARCH)/extract $(LAYER_DIR)
@@ -49,6 +50,7 @@ $(LAYER_DIR)/bin/ffmpeg: versions.mk
 		case "$${lib##*.so.}" in *.*) ;; *) cp -L "$$lib" $(LAYER_DIR)/lib/ ;; esac; \
 	done
 	mv build/$(ARCH)/extract/bin $(LAYER_DIR)
+	touch $@
 
 build: $(LAYER_DIR)/bin/ffmpeg
 
