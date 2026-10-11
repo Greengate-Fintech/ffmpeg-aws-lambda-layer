@@ -23,6 +23,8 @@ Resources:
     Properties:
       LayerName: !Ref LayerName
       Description: FFMPEG for AWS Lambda
+      # The Makefile rewrites ContentUri to each architecture's layer directory in
+      # build/<arch>/template.yaml; deploy with make deploy ARCH=..., not this file directly.
       ContentUri: build/layer
       CompatibleRuntimes:
         - nodejs24.x

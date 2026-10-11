@@ -68,7 +68,7 @@ an x86_64 host the binaries run in an `amazonlinux:2023` container under QEMU (s
 
 Key `Makefile` targets, in dependency order:
 1. `build/<arch>/layer/bin/ffmpeg` — downloads the asset named in `versions.mk` for `$(ARCH)`, stops if its
-   SHA-256 differs (`SHA256` can be overridden to test that), then extracts `ffmpeg`/`ffprobe` into
+   SHA-256 differs (`FFMPEG_SHA256_OVERRIDE` can be set to test that), then extracts `ffmpeg`/`ffprobe` into
    `build/<arch>/layer/bin/` and each FFmpeg shared library, once, as a regular file named by its soname
    (`libavcodec.so.62` and so on) into `build/<arch>/layer/lib/`. Headers, pkg-config files, docs and
    `ffplay` are left out. The static assets are not used: their x86_64 `ffmpeg` plus `ffprobe` is 344 MB,

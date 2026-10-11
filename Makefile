@@ -14,8 +14,9 @@ $(error ARCH must be x86_64 or arm64, got '$(ARCH)')
 endif
 
 FFMPEG_ASSET = $(FFMPEG_ASSET_$(ARCH))
-# Expected SHA-256 of the download; override only to test the check itself.
-SHA256 ?= $(FFMPEG_SHA256_$(ARCH))
+# Expected SHA-256 of the download. FFMPEG_SHA256_OVERRIDE exists only to test the
+# check itself; the distinct name keeps an unrelated SHA256 environment variable out.
+FFMPEG_SHA256 = $(or $(FFMPEG_SHA256_OVERRIDE),$(FFMPEG_SHA256_$(ARCH)))
 FFMPEG_URL = https://github.com/BtbN/FFmpeg-Builds/releases/download/$(BTBN_RELEASE)/$(FFMPEG_ASSET)
 LAYER_DIR = build/$(ARCH)/layer
 
@@ -41,7 +42,7 @@ $(LAYER_DIR)/bin/ffmpeg: versions.mk
 	rm -rf build/$(ARCH)/extract $(LAYER_DIR)
 	mkdir -p build/$(ARCH)/extract $(LAYER_DIR)
 	curl -fsSL -o build/$(ARCH)/$(FFMPEG_ASSET) $(FFMPEG_URL)
-	echo "$(SHA256)  build/$(ARCH)/$(FFMPEG_ASSET)" | sha256sum -c -
+	echo "$(FFMPEG_SHA256)  build/$(ARCH)/$(FFMPEG_ASSET)" | sha256sum -c -
 	tar -xJf build/$(ARCH)/$(FFMPEG_ASSET) -C build/$(ARCH)/extract --strip-components=1 --wildcards '*/bin/ffmpeg' '*/bin/ffprobe' '*/lib/*.so*'
 	mkdir -p $(LAYER_DIR)/lib
 	for lib in build/$(ARCH)/extract/lib/*.so.*; do \

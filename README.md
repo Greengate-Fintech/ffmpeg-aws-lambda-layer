@@ -20,6 +20,8 @@ For manual deployments and custom builds, read below...
 ## Prerequisites
 
 * Unix Make environment
+* `ffmpeg` and `ffprobe` on the host `PATH`, with the `libvpx` encoder (just for `make check`, which uses them to generate and count its test WebM; override with `FIXTURE_FFMPEG`/`FIXTURE_FFPROBE`)
+* Docker with arm64 emulation for `make check ARCH=arm64` on an x86_64 host (see below)
 * AWS command line utilities (just for deployment)
 
 ## Deploying to AWS as a layer
